@@ -42,12 +42,6 @@ class SupremeCourtBot(commands.Bot):
     # Override zamiast dekoratora
     async def setup_hook(self):
         # 1) Ładowanie wszystkich cogs
-        try:
-            with open("database.py", "r") as f:
-                db_content = f.read()
-            logger.info(f"Zawartość database.py:\n{db_content}")
-        except Exception as e:
-            logger.error(f"Błąd odczytu database.py: {e}")
         for fname in os.listdir("./cogs"):
             if not fname.endswith(".py") or fname.startswith("__"):
                 continue
