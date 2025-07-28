@@ -28,23 +28,32 @@ class DutyView(discord.ui.View):
         user = interaction.user
         guild_id = interaction.guild.id
 
-        if database.is_user_on_duty(user.id, guild_id):
-            # Oblicz czas trwania służby i dodaj do sumy
-            user_data = database.get_on_duty_users(guild_id) # Pobieramy wszystkich aktywnych, a potem filtrujemy
-            user_on_duty_entry = next((u for u in user_data if u['user_id'] == user.id), None)
+        try:
+            if database.is_user_on_duty(user.id, guild_id):
+                # Oblicz czas trwania służby i dodaj do sumy
+                user_data = database.get_on_duty_users(guild_id) # Pobieramy wszystkich aktywnych, a potem filtrujemy
+                user_on_duty_entry = next((u for u in user_data if u['user_id'] == user.id), None)
 
-            if user_on_duty_entry:
-                start_time = datetime.datetime.fromisoformat(user_on_duty_entry['start_time'])
-                duration_seconds = (datetime.datetime.utcnow() - start_time).total_seconds()
-                database.adjust_user_total_duty_seconds(user.id, guild_id, duration_seconds)
-                database.log_duty_event(guild_id, user.id, "Zszedł ze służby", f"Czas trwania: {int(duration_seconds)}s")
+                if user_on_duty_entry:
+                    start_time = datetime.datetime.fromisoformat(user_on_duty_entry['start_time'])
+                    duration_seconds = (datetime.datetime.utcnow() - start_time).total_seconds()
+                    database.adjust_user_total_duty_seconds(user.id, guild_id, duration_seconds)
+                    database.log_duty_event(guild_id, user.id, "Zszedł ze służby", f"Czas trwania: {int(duration_seconds)}s")
+                else:
+                    # Użytkownik był na służbie w bazie, ale nie znaleziono jego wpisu w active_duty_users
+                    # Może to oznaczać niespójność danych lub problem z pobieraniem
+                    database.log_duty_event(guild_id, user.id, "Błąd zejścia ze służby", "Użytkownik nie znaleziony w active_duty_users mimo is_user_on_duty")
 
-            database.remove_user_from_duty(user.id, guild_id)
-            await interaction.response.send_message("Zszedłeś ze służby.", ephemeral=True)
-            await self.cog.update_duty_panels(interaction.guild)
-        else:
-            await interaction.response.send_message("Nie jesteś na służbie!", ephemeral=True)
-            database.log_duty_event(guild_id, user.id, "Próba zejścia ze służby (nie na służbie)")
+                database.remove_user_from_duty(user.id, guild_id)
+                await interaction.response.send_message("Zszedłeś ze służby.", ephemeral=True)
+                await self.cog.update_duty_panels(interaction.guild)
+            else:
+                await interaction.response.send_message("Nie jesteś na służbie!", ephemeral=True)
+                database.log_duty_event(guild_id, user.id, "Próba zejścia ze służby (nie na służbie)")
+        except Exception as e:
+            await interaction.response.send_message("Wystąpił błąd podczas próby zejścia ze służby.", ephemeral=True)
+            database.log_duty_event(guild_id, user.id, "Krytyczny błąd zejścia ze służby", f"Błąd: {e}")
+            print(f"Krytyczny błąd w duty_off dla użytkownika {user.id}: {e}") # Dodatkowe logowanie do konsoli
 
 class zmiana(commands.Cog):
     def __init__(self, bot: commands.Bot):
