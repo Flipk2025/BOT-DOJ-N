@@ -42,9 +42,7 @@ class SupremeCourtBot(commands.Bot):
     # Override zamiast dekoratora
     async def setup_hook(self):
         # 1) Ładowanie wszystkich cogs
-        cogs_dir_contents = os.listdir("./cogs")
-        logger.info(f"Zawartość folderu cogs: {cogs_dir_contents}")
-        for fname in cogs_dir_contents:
+        for fname in os.listdir("./cogs"):
             if not fname.endswith(".py") or fname.startswith("__"):
                 continue
             ext = f"cogs.{fname[:-3]}"
