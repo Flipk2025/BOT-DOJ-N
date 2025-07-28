@@ -1,16 +1,11 @@
-
-
 import discord
 from discord.ext import commands, tasks
 from discord import app_commands
 import datetime
-import asyncio
-
-# Przechowuje informacje o wiadomości panelu i użytkownikach na służbie
-# Klucz: ID serwera, Wartość: słownik {'message_id': ID wiadomości, 'channel_id': ID kanału}
-duty_panels = {} 
-# Klucz: ID serwera, Wartość: słownik {ID użytkownika: czas rozpoczęcia}
-on_duty_users = {} 
+from database import (
+    set_duty_panel, get_duty_panel, get_all_duty_panels,
+    is_user_on_duty, add_user_to_duty, remove_user_from_duty, get_on_duty_users
+)
 
 class DutyView(discord.ui.View):
     def __init__(self, cog_instance):
@@ -22,13 +17,10 @@ class DutyView(discord.ui.View):
         user = interaction.user
         guild_id = interaction.guild.id
 
-        if guild_id not in on_duty_users:
-            on_duty_users[guild_id] = {}
-
-        if user.id in on_duty_users[guild_id]:
+        if is_user_on_duty(user.id, guild_id):
             await interaction.response.send_message("Jesteś już na służbie!", ephemeral=True)
         else:
-            on_duty_users[guild_id][user.id] = datetime.datetime.utcnow()
+            add_user_to_duty(user.id, guild_id, datetime.datetime.utcnow())
             await interaction.response.send_message("Wszedłeś na służbę.", ephemeral=True)
             await self.cog.update_duty_list(interaction.guild)
 
@@ -37,8 +29,8 @@ class DutyView(discord.ui.View):
         user = interaction.user
         guild_id = interaction.guild.id
 
-        if guild_id in on_duty_users and user.id in on_duty_users[guild_id]:
-            del on_duty_users[guild_id][user.id]
+        if is_user_on_duty(user.id, guild_id):
+            remove_user_from_duty(user.id, guild_id)
             await interaction.response.send_message("Zszedłeś ze służby.", ephemeral=True)
             await self.cog.update_duty_list(interaction.guild)
         else:
@@ -48,6 +40,8 @@ class zmiana(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.update_loop.start()
+        # Rejestrujemy widok globalnie przy starcie bota
+        # To ważne, aby przyciski działały po restarcie bota
         self.bot.add_view(DutyView(self))
 
     def cog_unload(self):
@@ -56,18 +50,20 @@ class zmiana(commands.Cog):
     @tasks.loop(minutes=1)
     async def update_loop(self):
         await self.bot.wait_until_ready()
-        for guild_id, panel_info in duty_panels.items():
-            guild = self.bot.get_guild(guild_id)
+        all_panels = get_all_duty_panels()
+        for panel_info in all_panels:
+            guild = self.bot.get_guild(panel_info['guild_id'])
             if guild:
-                await self.update_duty_list(guild)
+                await self.cog.update_duty_list(guild)
 
     async def update_duty_list(self, guild: discord.Guild):
-        panel_info = duty_panels.get(guild.id)
+        panel_info = get_duty_panel(guild.id)
         if not panel_info:
             return
 
         channel = guild.get_channel(panel_info['channel_id'])
         if not channel:
+            # Kanał mógł zostać usunięty
             return
 
         try:
@@ -81,17 +77,17 @@ class zmiana(commands.Cog):
             color=discord.Color.blue()
         )
 
-        guild_users = on_duty_users.get(guild.id, {})
+        guild_users = get_on_duty_users(guild.id)
         if not guild_users:
             embed.description = "Nikt aktualnie nie jest na służbie."
         else:
             description = []
             now = datetime.datetime.utcnow()
-            for user_id, start_time in guild_users.items():
-                member = guild.get_member(user_id)
+            for user_row in guild_users:
+                member = guild.get_member(user_row['user_id'])
                 if member:
+                    start_time = datetime.datetime.fromisoformat(user_row['start_time'])
                     duration = now - start_time
-                    # Formatowanie czasu HH:MM:SS
                     hours, remainder = divmod(int(duration.total_seconds()), 3600)
                     minutes, seconds = divmod(remainder, 60)
                     time_str = f"{hours:02}:{minutes:02}:{seconds:02}"
@@ -116,17 +112,13 @@ class zmiana(commands.Cog):
         
         try:
             message = await channel.send(embed=embed, view=view)
-            duty_panels[interaction.guild.id] = {
-                'message_id': message.id,
-                'channel_id': channel.id
-            }
+            # Zapisz informacje o panelu w bazie danych
+            set_duty_panel(interaction.guild.id, channel.id, message.id)
             await interaction.followup.send(f"Panel służby został pomyślnie ustawiony na kanale {channel.mention}.")
         except discord.Forbidden:
             await interaction.followup.send("Nie mam uprawnień do wysyłania wiadomości na tym kanale.")
         except Exception as e:
             await interaction.followup.send(f"Wystąpił błąd: {e}")
 
-
 async def setup(bot: commands.Bot):
-    await bot.add_cog(Zmiana(bot))
-
+    await bot.add_cog(zmiana(bot))
