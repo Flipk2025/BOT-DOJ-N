@@ -12,7 +12,7 @@ class WezwijRada(commands.Cog):
 	)
 	@app_commands.describe(member="Osoba, którą chcesz wezwać")
 	async def wezwij_rada(self, interaction: discord.Interaction, member: discord.Member):
-		allowed_role_id = 1334881150925275194
+		allowed_role_id = 1396940700112781448
 		if allowed_role_id not in [role.id for role in interaction.user.roles]:
 			await interaction.response.send_message(
 				"Nie posiadasz uprawnień do użycia tej komendy.",
@@ -20,13 +20,13 @@ class WezwijRada(commands.Cog):
 			)
 			return
 
-		target_channel = self.bot.get_channel(1364172834183708693)
+		target_channel = self.bot.get_channel(1399343396430286899)
 		if target_channel is None:
 			await interaction.response.send_message(
 				"Nie znaleziono kanału dla Rady Departamentu.", ephemeral=True)
 			return
 
-		waiting_channel = self.bot.get_channel(1364176400466317417)
+		waiting_channel = self.bot.get_channel(1396940705829621917)
 		if waiting_channel is None:
 			await interaction.response.send_message(
 				"Nie znaleziono kanału Poczekalnia do zarządu.",

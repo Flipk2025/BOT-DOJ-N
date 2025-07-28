@@ -9,7 +9,7 @@ import datetime
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'database.db')
 
 def get_db_connection():
-    """Nawiązuje połączenie z bazą danych i zwraca obiekt połączenia."""
+    """Nawiązuje połączenie z bazą danych i zwraca obiekt połączenia.""" 
     conn = sqlite3.connect(DB_PATH)
     # Umożliwia dostęp do kolumn przez ich nazwy (działa jak słownik)
     conn.row_factory = sqlite3.Row
@@ -39,7 +39,27 @@ def initialize_db():
             user_id INTEGER NOT NULL,
             guild_id INTEGER NOT NULL,
             start_time TEXT NOT NULL,
+            total_duty_seconds INTEGER DEFAULT 0,
             PRIMARY KEY (user_id, guild_id)
+        )
+    ''')
+
+    # Dodaj kolumnę total_duty_seconds, jeśli jeszcze nie istnieje
+    try:
+        cursor.execute("ALTER TABLE on_duty_users ADD COLUMN total_duty_seconds INTEGER DEFAULT 0")
+    except sqlite3.OperationalError as e:
+        if "duplicate column name" not in str(e):
+            raise
+
+    # Tabela do logowania zdarzeń służby
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS duty_logs (
+            log_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            guild_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            action TEXT NOT NULL,
+            details TEXT
         )
     ''')
 
@@ -82,7 +102,7 @@ def add_user_to_duty(user_id, guild_id, start_time):
     """Dodaje użytkownika do listy osób na służbie."""
     with get_db_connection() as conn:
         conn.execute(
-            "INSERT INTO on_duty_users (user_id, guild_id, start_time) VALUES (?, ?, ?)",
+            "INSERT OR IGNORE INTO on_duty_users (user_id, guild_id, start_time) VALUES (?, ?, ?)",
             (user_id, guild_id, start_time.isoformat())
         )
         conn.commit()
@@ -98,3 +118,62 @@ def get_on_duty_users(guild_id):
     with get_db_connection() as conn:
         users = conn.execute("SELECT * FROM on_duty_users WHERE guild_id = ?", (guild_id,)).fetchall()
     return users
+
+def set_user_total_duty_seconds(user_id, guild_id, seconds):
+    """Ustawia sumę czasu służby dla użytkownika."""
+    with get_db_connection() as conn:
+        conn.execute(
+            "INSERT INTO on_duty_users (user_id, guild_id, total_duty_seconds, start_time) VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(user_id, guild_id) DO UPDATE SET total_duty_seconds = ?",
+            (user_id, guild_id, seconds, datetime.datetime.utcnow().isoformat(), seconds)
+        )
+        conn.commit()
+
+def adjust_user_total_duty_seconds(user_id, guild_id, seconds_delta):
+    """Dodaje lub odejmuje określoną liczbę sekund od sumy czasu służby użytkownika."""
+    with get_db_connection() as conn:
+        conn.execute(
+            "INSERT INTO on_duty_users (user_id, guild_id, total_duty_seconds, start_time) VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(user_id, guild_id) DO UPDATE SET total_duty_seconds = total_duty_seconds + ?",
+            (user_id, guild_id, seconds_delta, datetime.datetime.utcnow().isoformat(), seconds_delta)
+        )
+        conn.commit()
+
+def get_user_total_duty_seconds(user_id, guild_id):
+    """Pobiera sumę czasu służby dla konkretnego użytkownika."""
+    with get_db_connection() as conn:
+        result = conn.execute("SELECT total_duty_seconds FROM on_duty_users WHERE user_id = ? AND guild_id = ?", (user_id, guild_id)).fetchone()
+    return result['total_duty_seconds'] if result else 0
+
+def get_all_total_duty_seconds(guild_id):
+    """Pobiera sumę czasu służby dla wszystkich użytkowników na danym serwerze."""
+    with get_db_connection() as conn:
+        users = conn.execute("SELECT user_id, total_duty_seconds FROM on_duty_users WHERE guild_id = ? AND total_duty_seconds > 0 ORDER BY total_duty_seconds DESC", (guild_id,)).fetchall()
+    return users
+
+def reset_all_total_duty_seconds(guild_id):
+    """Resetuje sumę czasu służby dla wszystkich użytkowników na danym serwerze."""
+    with get_db_connection() as conn:
+        conn.execute("UPDATE on_duty_users SET total_duty_seconds = 0 WHERE guild_id = ?", (guild_id,))
+        conn.commit()
+
+
+# --- Funkcje do logowania zdarzeń służby ---
+
+def log_duty_event(guild_id, user_id, action, details=None):
+    """Loguje zdarzenie związane ze służbą."""
+    with get_db_connection() as conn:
+        conn.execute(
+            "INSERT INTO duty_logs (timestamp, guild_id, user_id, action, details) VALUES (?, ?, ?, ?, ?)",
+            (datetime.datetime.utcnow().isoformat(), guild_id, user_id, action, details)
+        )
+        conn.commit()
+
+def get_duty_logs(guild_id, limit=100):
+    """Pobiera logi zdarzeń służby dla danego serwera."""
+    with get_db_connection() as conn:
+        logs = conn.execute(
+            "SELECT * FROM duty_logs WHERE guild_id = ? ORDER BY timestamp DESC LIMIT ?",
+            (guild_id, limit)
+        ).fetchall()
+    return logs

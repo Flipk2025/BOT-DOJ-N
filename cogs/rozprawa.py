@@ -93,7 +93,7 @@ class Rozprawa(commands.Cog):
                 return
 
             # Sprawdź czy kanał sądu istnieje
-            court_channel_id = 1370809492283064350
+            court_channel_id = 1396940700611907619
             court_channel = self.bot.get_channel(court_channel_id)
             if not court_channel:
                 await interaction.response.send_message(
