@@ -3,6 +3,9 @@ from discord.ext import commands, tasks
 from discord import app_commands
 import datetime
 import database # Importujemy cały moduł database
+import logging
+
+logger = logging.getLogger('bot') # Używamy istniejącego loggera
 
 class DutyView(discord.ui.View):
     def __init__(self, cog_instance):
@@ -11,7 +14,14 @@ class DutyView(discord.ui.View):
 
     @discord.ui.button(label="Wejdź na służbę", style=discord.ButtonStyle.success, custom_id="duty_on")
     async def duty_on(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.defer(ephemeral=True) # Odrocz odpowiedź
+        logger.info(f"DEBUG: Entering duty_on for user {interaction.user.id}")
+        try:
+            await interaction.response.defer(ephemeral=True) # Odrocz odpowiedź
+        except Exception as e:
+            logger.error(f"DEBUG: Błąd defer w duty_on dla {interaction.user.id}: {e}")
+            await interaction.followup.send("Wystąpił błąd podczas przetwarzania. Spróbuj ponownie.", ephemeral=True)
+            return
+
         user = interaction.user
         guild_id = interaction.guild.id
 
@@ -26,7 +36,14 @@ class DutyView(discord.ui.View):
 
     @discord.ui.button(label="Zejdź ze służby", style=discord.ButtonStyle.danger, custom_id="duty_off")
     async def duty_off(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.defer(ephemeral=True) # Odrocz odpowiedź
+        logger.info(f"DEBUG: Entering duty_off for user {interaction.user.id}")
+        try:
+            await interaction.response.defer(ephemeral=True) # Odrocz odpowiedź
+        except Exception as e:
+            logger.error(f"DEBUG: Błąd defer w duty_off dla {interaction.user.id}: {e}")
+            await interaction.followup.send("Wystąpił błąd podczas przetwarzania. Spróbuj ponownie.", ephemeral=True)
+            return
+
         user = interaction.user
         guild_id = interaction.guild.id
 
@@ -55,7 +72,7 @@ class DutyView(discord.ui.View):
         except Exception as e:
             await interaction.followup.send("Wystąpił błąd podczas próby zejścia ze służby.", ephemeral=True)
             database.log_duty_event(guild_id, user.id, "Krytyczny błąd zejścia ze służby", f"Błąd: {e}")
-            print(f"Krytyczny błąd w duty_off dla użytkownika {user.id}: {e}") # Dodatkowe logowanie do konsoli
+            logger.error(f"Krytyczny błąd w duty_off dla użytkownika {user.id}: {e}") # Dodatkowe logowanie do konsoli
 
 class zmiana(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -146,8 +163,13 @@ class zmiana(commands.Cog):
     @app_commands.command(name="setup_zmiana", description="Ustawia panel do zarządzania zmianą na danym kanale.")
     @app_commands.checks.has_permissions(administrator=True)
     async def setup_zmiana(self, interaction: discord.Interaction, channel: discord.TextChannel):
-        """Ustawia panel służby na określonym kanale."""
-        await interaction.response.defer(ephemeral=True)
+        logger.info(f"DEBUG: Entering setup_zmiana for user {interaction.user.id}")
+        try:
+            await interaction.response.defer(ephemeral=True)
+        except Exception as e:
+            logger.error(f"DEBUG: Błąd defer w setup_zmiana dla {interaction.user.id}: {e}")
+            await interaction.followup.send("Wystąpił błąd podczas przetwarzania. Spróbuj ponownie.", ephemeral=True)
+            return
 
         # Wysyłanie wiadomości dla aktywnych
         active_embed = discord.Embed(
@@ -186,7 +208,6 @@ class zmiana(commands.Cog):
     @app_commands.command(name="reset_godzin", description="Resetuje sumę godzin służby dla wszystkich użytkowników.")
     @app_commands.checks.has_permissions(administrator=True)
     async def reset_godzin(self, interaction: discord.Interaction):
-        """Resetuje sumę godzin służby dla wszystkich użytkowników na serwerze."""
         await interaction.response.defer(ephemeral=True)
         guild_id = interaction.guild.id
         database.reset_all_total_duty_seconds(guild_id)
@@ -197,7 +218,6 @@ class zmiana(commands.Cog):
     @app_commands.command(name="ustaw_godziny_osoby", description="Ustawia godziny służby dla konkretnej osoby.")
     @app_commands.checks.has_permissions(administrator=True)
     async def set_person_hours(self, interaction: discord.Interaction, user: discord.Member, hours: int, minutes: int):
-        """Ustawia godziny służby dla konkretnej osoby."""
         await interaction.response.defer(ephemeral=True)
         guild_id = interaction.guild.id
         total_seconds = (hours * 3600) + (minutes * 60)
@@ -209,7 +229,6 @@ class zmiana(commands.Cog):
     @app_commands.command(name="dodaj_godziny_osoby", description="Dodaje godziny służby do konkretnej osoby.")
     @app_commands.checks.has_permissions(administrator=True)
     async def add_person_hours(self, interaction: discord.Interaction, user: discord.Member, hours: int, minutes: int):
-        """Dodaje godziny służby do konkretnej osoby."""
         await interaction.response.defer(ephemeral=True)
         guild_id = interaction.guild.id
         seconds_to_add = (hours * 3600) + (minutes * 60)
@@ -221,7 +240,6 @@ class zmiana(commands.Cog):
     @app_commands.command(name="odejmij_godziny_osoby", description="Odejmuje godziny służby od konkretnej osoby.")
     @app_commands.checks.has_permissions(administrator=True)
     async def remove_person_hours(self, interaction: discord.Interaction, user: discord.Member, hours: int, minutes: int):
-        """Odejmuje godziny służby od konkretnej osoby.""" 
         await interaction.response.defer(ephemeral=True)
         guild_id = interaction.guild.id
         seconds_to_remove = -((hours * 3600) + (minutes * 60)) # Ujemna wartość do odjęcia
@@ -233,7 +251,6 @@ class zmiana(commands.Cog):
     @app_commands.command(name="resetuj_godziny_osoby", description="Resetuje godziny służby dla konkretnej osoby.")
     @app_commands.checks.has_permissions(administrator=True)
     async def reset_person_hours(self, interaction: discord.Interaction, user: discord.Member):
-        """Resetuje godziny służby dla konkretnej osoby."""
         await interaction.response.defer(ephemeral=True)
         guild_id = interaction.guild.id
         database.reset_user_total_duty_seconds(user.id, guild_id)
@@ -244,7 +261,6 @@ class zmiana(commands.Cog):
     @app_commands.command(name="pokaz_logi_sluzby", description="Pokazuje ostatnie logi zdarzeń służby.")
     @app_commands.checks.has_permissions(administrator=True)
     async def show_duty_logs(self, interaction: discord.Interaction, limit: int = 10):
-        """Pokazuje ostatnie logi zdarzeń służby."""
         await interaction.response.defer(ephemeral=True)
         guild_id = interaction.guild.id
         database.log_duty_event(guild_id, interaction.user.id, "Użyto komendy pokaz_logi_sluzby", f"Limit: {limit}")
