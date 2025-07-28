@@ -11,20 +11,22 @@ class DutyView(discord.ui.View):
 
     @discord.ui.button(label="Wejdź na służbę", style=discord.ButtonStyle.success, custom_id="duty_on")
     async def duty_on(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True) # Odrocz odpowiedź
         user = interaction.user
         guild_id = interaction.guild.id
 
         if database.is_user_on_duty(user.id, guild_id):
-            await interaction.response.send_message("Jesteś już na służbie!", ephemeral=True)
+            await interaction.followup.send("Jesteś już na służbie!", ephemeral=True)
             database.log_duty_event(guild_id, user.id, "Próba wejścia na służbę (już na służbie)")
         else:
             database.add_user_to_duty(user.id, guild_id, datetime.datetime.utcnow())
-            await interaction.response.send_message("Wszedłeś na służbę.", ephemeral=True)
+            await interaction.followup.send("Wszedłeś na służbę.", ephemeral=True)
             database.log_duty_event(guild_id, user.id, "Wszedł na służbę")
             await self.cog.update_duty_panels(interaction.guild)
 
     @discord.ui.button(label="Zejdź ze służby", style=discord.ButtonStyle.danger, custom_id="duty_off")
     async def duty_off(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True) # Odrocz odpowiedź
         user = interaction.user
         guild_id = interaction.guild.id
 
@@ -45,13 +47,13 @@ class DutyView(discord.ui.View):
                     database.log_duty_event(guild_id, user.id, "Błąd zejścia ze służby", "Użytkownik nie znaleziony w active_duty_users mimo is_user_on_duty")
 
                 database.remove_user_from_duty(user.id, guild_id)
-                await interaction.response.send_message("Zszedłeś ze służby.", ephemeral=True)
+                await interaction.followup.send("Zszedłeś ze służby.", ephemeral=True)
                 await self.cog.update_duty_panels(interaction.guild)
             else:
-                await interaction.response.send_message("Nie jesteś na służbie!", ephemeral=True)
+                await interaction.followup.send("Nie jesteś na służbie!", ephemeral=True)
                 database.log_duty_event(guild_id, user.id, "Próba zejścia ze służby (nie na służbie)")
         except Exception as e:
-            await interaction.response.send_message("Wystąpił błąd podczas próby zejścia ze służby.", ephemeral=True)
+            await interaction.followup.send("Wystąpił błąd podczas próby zejścia ze służby.", ephemeral=True)
             database.log_duty_event(guild_id, user.id, "Krytyczny błąd zejścia ze służby", f"Błąd: {e}")
             print(f"Krytyczny błąd w duty_off dla użytkownika {user.id}: {e}") # Dodatkowe logowanie do konsoli
 
