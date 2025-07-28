@@ -44,7 +44,7 @@ class DutyView(discord.ui.View):
         else:
             await interaction.response.send_message("Nie jesteś na służbie!", ephemeral=True)
 
-class Zmiana(commands.Cog):
+class zmiana(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.update_loop.start()
