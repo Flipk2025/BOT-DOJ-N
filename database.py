@@ -176,7 +176,7 @@ def adjust_user_total_duty_seconds(user_id, guild_id, seconds_delta):
         conn.execute(
             "INSERT INTO user_duty_stats (user_id, guild_id, total_duty_seconds) VALUES (?, ?, ?) "
             "ON CONFLICT(user_id, guild_id) DO UPDATE SET total_duty_seconds = total_duty_seconds + ?",
-            (user_id, guild_id, seconds_delta)
+            (user_id, guild_id, seconds_delta, seconds_delta)
         )
         conn.commit()
 
