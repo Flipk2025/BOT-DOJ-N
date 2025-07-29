@@ -13,14 +13,23 @@ class DutyView(discord.ui.View):
         super().__init__(timeout=None)
         self.cog = cog_instance
 
+    async def handle_interaction(self, interaction: discord.Interaction):
+        try:
+            await interaction.response.defer(ephemeral=True)
+            return True
+        except discord.errors.NotFound:
+            logger.warning(f"Interaction {interaction.id} not found (likely expired). Proceeding with logic.")
+            return False # Wskazuje, że nie można użyć followup
+
     @discord.ui.button(label="Wejdź na służbę", style=discord.ButtonStyle.success, custom_id="duty_on")
     async def duty_on(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.defer(ephemeral=True)
+        can_followup = await self.handle_interaction(interaction)
         user = interaction.user
         guild = interaction.guild
 
         if database.is_user_on_duty(user.id, guild.id):
-            await interaction.followup.send("Jesteś już na służbie!", ephemeral=True)
+            if can_followup:
+                await interaction.followup.send("Jesteś już na służbie!", ephemeral=True)
             return
 
         start_time = datetime.datetime.utcnow()
@@ -28,19 +37,21 @@ class DutyView(discord.ui.View):
         log_message_id = log_message.id if log_message else None
 
         database.add_user_to_duty(user.id, guild.id, start_time, log_message_id)
-        await interaction.followup.send("Wszedłeś na służbę.", ephemeral=True)
+        if can_followup:
+            await interaction.followup.send("Wszedłeś na służbę.", ephemeral=True)
         database.log_duty_event(guild.id, user.id, "Wszedł na służbę")
         await self.cog.update_duty_panels(guild)
 
     @discord.ui.button(label="Zejdź ze służby", style=discord.ButtonStyle.danger, custom_id="duty_off")
     async def duty_off(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.defer(ephemeral=True)
+        can_followup = await self.handle_interaction(interaction)
         user = interaction.user
         guild = interaction.guild
 
         duty_entry = database.get_user_duty_entry(user.id, guild.id)
         if not duty_entry:
-            await interaction.followup.send("Nie jesteś na służbie!", ephemeral=True)
+            if can_followup:
+                await interaction.followup.send("Nie jesteś na służbie!", ephemeral=True)
             return
 
         start_time = datetime.datetime.fromisoformat(duty_entry['start_time'])
@@ -50,7 +61,8 @@ class DutyView(discord.ui.View):
         await self.cog.send_duty_log(guild, user, "off", start_time, duty_entry['log_message_id'])
 
         database.remove_user_from_duty(user.id, guild.id)
-        await interaction.followup.send("Zszedłeś ze służby.", ephemeral=True)
+        if can_followup:
+            await interaction.followup.send("Zszedłeś ze służby.", ephemeral=True)
         database.log_duty_event(guild.id, user.id, "Zszedł ze służby", f"Czas trwania: {int(duration_seconds)}s")
         await self.cog.update_duty_panels(guild)
 
@@ -108,6 +120,8 @@ class zmiana(commands.Cog):
                 embed = message.embeds[0]
                 embed.title = "✅ Służba zakończona"
                 embed.color = discord.Color.greyple()
+                embed.clear_fields() # Wyczyść stare pola przed dodaniem nowych
+                embed.add_field(name="Czas wejścia", value=start_timestamp, inline=False)
                 embed.add_field(name="Czas zejścia", value=end_timestamp, inline=False)
                 embed.add_field(name="Czas trwania służby", value=duration_str, inline=True)
                 embed.add_field(name="Łączny czas na służbie", value=total_duration_str, inline=True)
@@ -210,7 +224,7 @@ class zmiana(commands.Cog):
         database.set_duty_log_channel(interaction.guild.id, channel.id)
         await interaction.followup.send(f"Kanał logów służby został ustawiony na {channel.mention}.")
 
-    # ... (reszta komend administracyjnych bez zmian) ...
+    # Pozostałe komendy administracyjne bez zmian
     @app_commands.command(name="reset_godzin", description="Resetuje sumę godzin służby dla wszystkich użytkowników.")
     @app_commands.checks.has_permissions(administrator=True)
     async def reset_godzin(self, interaction: discord.Interaction):
