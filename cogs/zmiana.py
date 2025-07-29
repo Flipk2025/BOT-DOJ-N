@@ -9,7 +9,7 @@ import pytz
 logger = logging.getLogger('bot')
 
 # Zmienna dla roli uprawnionej do odwoływania ze służby
-ODWOLAJ_ROLE_ID = 123456789012345678  # UZUPEŁNIJ ID ROLI
+ODWOLAJ_ROLE_ID = 1396940700112781448  # UZUPEŁNIJ ID ROLI
 
 async def handle_interaction_error(interaction: discord.Interaction):
     """Centralna funkcja do obsługi wygasłych interakcji."""
