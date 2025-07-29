@@ -8,22 +8,23 @@ import pytz
 
 logger = logging.getLogger('bot')
 
+async def handle_interaction_error(interaction: discord.Interaction):
+    """Centralna funkcja do obsługi wygasłych interakcji."""
+    try:
+        await interaction.response.defer(ephemeral=True)
+        return True
+    except discord.errors.NotFound:
+        logger.warning(f"Interaction {interaction.id} not found (likely expired). Command will not send a followup.")
+        return False
+
 class DutyView(discord.ui.View):
     def __init__(self, cog_instance):
         super().__init__(timeout=None)
         self.cog = cog_instance
 
-    async def handle_interaction(self, interaction: discord.Interaction):
-        try:
-            await interaction.response.defer(ephemeral=True)
-            return True
-        except discord.errors.NotFound:
-            logger.warning(f"Interaction {interaction.id} not found (likely expired). Proceeding with logic.")
-            return False # Wskazuje, że nie można użyć followup
-
     @discord.ui.button(label="Wejdź na służbę", style=discord.ButtonStyle.success, custom_id="duty_on")
     async def duty_on(self, interaction: discord.Interaction, button: discord.ui.Button):
-        can_followup = await self.handle_interaction(interaction)
+        can_followup = await handle_interaction_error(interaction)
         user = interaction.user
         guild = interaction.guild
 
@@ -44,7 +45,7 @@ class DutyView(discord.ui.View):
 
     @discord.ui.button(label="Zejdź ze służby", style=discord.ButtonStyle.danger, custom_id="duty_off")
     async def duty_off(self, interaction: discord.Interaction, button: discord.ui.Button):
-        can_followup = await self.handle_interaction(interaction)
+        can_followup = await handle_interaction_error(interaction)
         user = interaction.user
         guild = interaction.guild
 
@@ -120,7 +121,7 @@ class zmiana(commands.Cog):
                 embed = message.embeds[0]
                 embed.title = "✅ Służba zakończona"
                 embed.color = discord.Color.greyple()
-                embed.clear_fields() # Wyczyść stare pola przed dodaniem nowych
+                embed.clear_fields()
                 embed.add_field(name="Czas wejścia", value=start_timestamp, inline=False)
                 embed.add_field(name="Czas zejścia", value=end_timestamp, inline=False)
                 embed.add_field(name="Czas trwania służby", value=duration_str, inline=True)
@@ -203,7 +204,10 @@ class zmiana(commands.Cog):
     @app_commands.command(name="setup_zmiana", description="Ustawia panel do zarządzania zmianą na danym kanale.")
     @app_commands.checks.has_permissions(administrator=True)
     async def setup_zmiana(self, interaction: discord.Interaction, channel: discord.TextChannel):
-        await interaction.response.defer(ephemeral=True)
+        can_followup = await handle_interaction_error(interaction)
+        if not can_followup:
+            return
+            
         active_embed = discord.Embed(title="Aktywni na służbie", description="Nikt aktualnie nie jest na służbie.", color=discord.Color.blue())
         view = DutyView(self)
         try:
@@ -211,81 +215,102 @@ class zmiana(commands.Cog):
             summary_embed = discord.Embed(title="Podsumowanie godzin służby", description="Brak zarejestrowanych godzin służby.", color=discord.Color.green())
             summary_message = await channel.send(embed=summary_embed)
         except discord.Forbidden:
-            await interaction.followup.send("Nie mam uprawnień do wysyłania wiadomości na tym kanale.")
+            await interaction.followup.send("Nie mam uprawnień do wysyłania wiadomości na tym kanale.", ephemeral=True)
             return
 
         database.set_duty_panel(interaction.guild.id, channel.id, active_message.id, summary_message.id)
-        await interaction.followup.send(f"Panel służby został pomyślnie ustawiony na kanale {channel.mention}.")
+        await interaction.followup.send(f"Panel służby został pomyślnie ustawiony na kanale {channel.mention}.", ephemeral=True)
 
     @app_commands.command(name="setup_logi_sluzby", description="Ustawia kanał, na który będą wysyłane logi wejść i zejść ze służby.")
     @app_commands.checks.has_permissions(administrator=True)
     async def setup_logi_sluzby(self, interaction: discord.Interaction, channel: discord.TextChannel):
-        await interaction.response.defer(ephemeral=True)
+        can_followup = await handle_interaction_error(interaction)
+        if not can_followup:
+            return
+            
         database.set_duty_log_channel(interaction.guild.id, channel.id)
-        await interaction.followup.send(f"Kanał logów służby został ustawiony na {channel.mention}.")
+        await interaction.followup.send(f"Kanał logów służby został ustawiony na {channel.mention}.", ephemeral=True)
 
-    # Pozostałe komendy administracyjne bez zmian
+    # Pozostałe komendy bez zmian, ale z dodaną obsługą błędów
     @app_commands.command(name="reset_godzin", description="Resetuje sumę godzin służby dla wszystkich użytkowników.")
     @app_commands.checks.has_permissions(administrator=True)
     async def reset_godzin(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True)
+        can_followup = await handle_interaction_error(interaction)
+        if not can_followup:
+            return
+
         guild_id = interaction.guild.id
         database.reset_all_total_duty_seconds(guild_id)
         database.log_duty_event(guild_id, interaction.user.id, "Użyto komendy reset_godzin")
         await self.update_duty_panels(interaction.guild)
-        await interaction.followup.send("Suma godzin służby została zresetowana dla wszystkich użytkowników.")
+        await interaction.followup.send("Suma godzin służby została zresetowana dla wszystkich użytkowników.", ephemeral=True)
 
     @app_commands.command(name="ustaw_godziny_osoby", description="Ustawia godziny służby dla konkretnej osoby.")
     @app_commands.checks.has_permissions(administrator=True)
     async def set_person_hours(self, interaction: discord.Interaction, user: discord.Member, hours: int, minutes: int):
-        await interaction.response.defer(ephemeral=True)
+        can_followup = await handle_interaction_error(interaction)
+        if not can_followup:
+            return
+
         guild_id = interaction.guild.id
         total_seconds = (hours * 3600) + (minutes * 60)
         database.set_user_total_duty_seconds(user.id, guild_id, total_seconds)
         database.log_duty_event(guild_id, interaction.user.id, "Ustawiono godziny służby", f"Użytkownik: {user.display_name}, Godziny: {hours}h {minutes}m")
         await self.update_duty_panels(interaction.guild)
-        await interaction.followup.send(f"Ustawiono {hours}h {minutes}m służby dla {user.mention}.")
+        await interaction.followup.send(f"Ustawiono {hours}h {minutes}m służby dla {user.mention}.", ephemeral=True)
 
     @app_commands.command(name="dodaj_godziny_osoby", description="Dodaje godziny służby do konkretnej osoby.")
     @app_commands.checks.has_permissions(administrator=True)
     async def add_person_hours(self, interaction: discord.Interaction, user: discord.Member, hours: int, minutes: int):
-        await interaction.response.defer(ephemeral=True)
+        can_followup = await handle_interaction_error(interaction)
+        if not can_followup:
+            return
+
         guild_id = interaction.guild.id
         seconds_to_add = (hours * 3600) + (minutes * 60)
-        database.adjust_user_total_duty_seconds(user.id, guild_id, seconds_to_add)
+        database.adjust_user_total_duty_seconds(user.id, guild.id, seconds_to_add)
         database.log_duty_event(guild_id, interaction.user.id, "Dodano godziny służby", f"Użytkownik: {user.display_name}, Dodano: {hours}h {minutes}m")
         await self.update_duty_panels(interaction.guild)
-        await interaction.followup.send(f"Dodano {hours}h {minutes}m służby dla {user.mention}.")
+        await interaction.followup.send(f"Dodano {hours}h {minutes}m służby dla {user.mention}.", ephemeral=True)
 
     @app_commands.command(name="odejmij_godziny_osoby", description="Odejmuje godziny służby od konkretnej osoby.")
     @app_commands.checks.has_permissions(administrator=True)
     async def remove_person_hours(self, interaction: discord.Interaction, user: discord.Member, hours: int, minutes: int):
-        await interaction.response.defer(ephemeral=True)
+        can_followup = await handle_interaction_error(interaction)
+        if not can_followup:
+            return
+
         guild_id = interaction.guild.id
         seconds_to_remove = -((hours * 3600) + (minutes * 60))
-        database.adjust_user_total_duty_seconds(user.id, guild_id, seconds_to_remove)
+        database.adjust_user_total_duty_seconds(user.id, guild.id, seconds_to_remove)
         database.log_duty_event(guild_id, interaction.user.id, "Odjęto godziny służby", f"Użytkownik: {user.display_name}, Odjęto: {hours}h {minutes}m")
         await self.update_duty_panels(interaction.guild)
-        await interaction.followup.send(f"Odjęto {hours}h {minutes}m służby od {user.mention}.")
+        await interaction.followup.send(f"Odjęto {hours}h {minutes}m służby od {user.mention}.", ephemeral=True)
 
     @app_commands.command(name="resetuj_godziny_osoby", description="Resetuje godziny służby dla konkretnej osoby.")
     @app_commands.checks.has_permissions(administrator=True)
     async def reset_person_hours(self, interaction: discord.Interaction, user: discord.Member):
-        await interaction.response.defer(ephemeral=True)
+        can_followup = await handle_interaction_error(interaction)
+        if not can_followup:
+            return
+
         guild_id = interaction.guild.id
         database.reset_user_total_duty_seconds(user.id, guild_id)
         database.log_duty_event(guild_id, interaction.user.id, "Zresetowano godziny służby osoby", f"Użytkownik: {user.display_name}")
         await self.update_duty_panels(interaction.guild)
-        await interaction.followup.send(f"Zresetowano godziny służby dla {user.mention}.")
+        await interaction.followup.send(f"Zresetowano godziny służby dla {user.mention}.", ephemeral=True)
 
     @app_commands.command(name="pokaz_logi_sluzby", description="Pokazuje ostatnie logi zdarzeń służby.")
     @app_commands.checks.has_permissions(administrator=True)
     async def show_duty_logs(self, interaction: discord.Interaction, limit: int = 10):
-        await interaction.response.defer(ephemeral=True)
+        can_followup = await handle_interaction_error(interaction)
+        if not can_followup:
+            return
+
         guild_id = interaction.guild.id
         logs = database.get_duty_logs(guild_id, limit)
         if not logs:
-            await interaction.followup.send("Brak logów służby.")
+            await interaction.followup.send("Brak logów służby.", ephemeral=True)
             return
 
         log_lines = []
@@ -302,7 +327,7 @@ class zmiana(commands.Cog):
              log_message = log_message[:3990] + "..."
 
         embed = discord.Embed(title="Logi Służby", description=f"```\n{log_message}\n```", color=discord.Color.orange())
-        await interaction.followup.send(embed=embed)
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(zmiana(bot))
