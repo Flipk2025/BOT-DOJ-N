@@ -106,8 +106,11 @@ def is_user_on_duty(user_id, guild_id):
 
 def add_user_to_duty(user_id, guild_id, start_time, log_message_id):
     with get_db_connection() as conn:
+        # Najpierw usuń istniejący wpis, aby uniknąć konfliktów
+        conn.execute("DELETE FROM active_duty_users WHERE user_id = ? AND guild_id = ?", (user_id, guild_id))
+        # Następnie dodaj nowy, czysty wpis
         conn.execute(
-            "INSERT OR REPLACE INTO active_duty_users (user_id, guild_id, start_time, log_message_id) VALUES (?, ?, ?, ?)",
+            "INSERT INTO active_duty_users (user_id, guild_id, start_time, log_message_id) VALUES (?, ?, ?, ?)",
             (user_id, guild_id, start_time.isoformat(), log_message_id)
         )
 
