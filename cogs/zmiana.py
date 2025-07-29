@@ -180,7 +180,7 @@ class zmiana(commands.Cog):
 
         try:
             active_message = await channel.fetch_message(panel_info['active_message_id'])
-            await active_message.edit(embed=active_embed, view=DutyView(self))
+            await active_message.edit(embed=active_embed) # Usunięto view=DutyView(self)
         except discord.NotFound:
             pass
 
