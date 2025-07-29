@@ -1,10 +1,11 @@
 import discord
 from discord.ext import commands
 from discord import app_commands
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 import traceback
 import hashlib
 import asyncio
+import pytz
 
 class Rozprawa(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -14,6 +15,8 @@ class Rozprawa(commands.Cog):
         self.recent_messages = {}
         # Interwał czasu (w sekundach) w ramach którego uznajemy wiadomości za duplikaty
         self.duplicate_window = 5
+        # Ustawienie strefy czasowej dla Polski
+        self.poland_tz = pytz.timezone('Europe/Warsaw')
 
     def _generate_content_hash(self, data, godzina, sedzia_prowadzacy, sedzia_pomocniczy, tryb, oskarzeni):
         """Generuje unikalny hash na podstawie parametrów rozprawy"""
@@ -27,7 +30,7 @@ class Rozprawa(commands.Cog):
             timestamp, msg_channel_id = self.recent_messages[content_hash]
             if msg_channel_id == channel_id:
                 # Sprawdź czy wiadomość została wysłana w ciągu ostatnich X sekund
-                if (now - timestamp) < timedelta(seconds=self.duplicate_window):
+                if (now - timestamp).total_seconds() < self.duplicate_window:
                     return True
         
         # Zapisz informację o aktualnej wiadomości
@@ -36,7 +39,7 @@ class Rozprawa(commands.Cog):
         # Usuwanie starych wpisów (starszych niż minuta)
         to_remove = []
         for hash_key, (msg_time, _) in self.recent_messages.items():
-            if (now - msg_time) > timedelta(minutes=1):
+            if (now - msg_time).total_seconds() > 60:
                 to_remove.append(hash_key)
         
         for key in to_remove:
@@ -75,20 +78,18 @@ class Rozprawa(commands.Cog):
 
             # Spróbuj sparsować datę i godzinę
             try:
-                # Parsujemy datę jako lokalną (UTC+2), a następnie odejmujemy offset
-                # by uzyskać prawidłowy czas UTC
-                dt_obj = datetime.strptime(f"{data} {godzina}", "%d/%m/%Y %H:%M")
+                # Parsujemy datę i godzinę
+                naive_dt_obj = datetime.strptime(f"{data} {godzina}", "%d/%m/%Y %H:%M")
+                
+                # Ustawiamy strefę czasową dla wprowadzonej daty
+                local_dt_obj = self.poland_tz.localize(naive_dt_obj)
+                
+                # Konwersja na timestamp UTC, który jest standardem dla Discorda
+                timestamp = int(local_dt_obj.timestamp())
 
-                # Tworzony jest czas lokalny, trzeba odjąć 2 godziny, by uzyskać poprawny UTC
-                # dla Discord timestamp
-                poland_offset = timedelta(hours=2)  # UTC+2 dla czasu polskiego
-                utc_time = dt_obj - poland_offset
-
-                # Konwersja na timestamp
-                timestamp = int(utc_time.replace(tzinfo=timezone.utc).timestamp())
             except ValueError:
                 await interaction.response.send_message(
-                    "Błędny format daty/godziny.", ephemeral=True
+                    "Błędny format daty/godziny. Użyj DD/MM/RRRR i HH:MM.", ephemeral=True
                 )
                 return
 
@@ -117,15 +118,15 @@ class Rozprawa(commands.Cog):
 
             # Przygotuj treść wiadomości
             content = (
-                "``` ```\n"
-                "# TERMIN ROZPRAWY\n\n"
-                f"### Data: {data} (<t:{timestamp}:R>)\n"
-                f"### Godzina: {godzina}\n"
-                f"### Sędzia prowadzący: {sedzia_prowadzacy}\n"
-                f"### Sędzia pomocniczy: {sedzia_pomocniczy}\n"
-                f"### Tryb: {tryb}\n"
-                f"### Oskarżony: {oskarzeni}\n"
-                "``` ```\n"
+                "``` ```"
+                "# TERMIN ROZPRAWY"
+                f"### Data: {data} (<t:{timestamp}:R>)"
+                f"### Godzina: {godzina}"
+                f"### Sędzia prowadzący: {sedzia_prowadzacy}"
+                f"### Sędzia pomocniczy: {sedzia_pomocniczy}"
+                f"### Tryb: {tryb}"
+                f"### Oskarżony: {oskarzeni}"
+                "``` ```"
                 "||<@&1370830123523379210>||"
             )
 
@@ -148,7 +149,7 @@ class Rozprawa(commands.Cog):
         except Exception as e:
             # Pełne logowanie błędu
             error_msg = ''.join(traceback.format_exception(type(e), e, e.__traceback__))
-            print(f"❌ Błąd podczas przetwarzania komendy /rozprawa:\n{error_msg}")
+            print(f"❌ Błąd podczas przetwarzania komendy /rozprawa:{error_msg}")
 
             try:
                 # Próba poinformowania użytkownika o błędzie

@@ -25,13 +25,13 @@ def initialize_db():
     cursor = conn.cursor()
 
     # Tabela do przechowywania informacji o panelach służby
-    # Zmieniono na dwa message_id
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS duty_panels (
             guild_id INTEGER PRIMARY KEY,
             channel_id INTEGER NOT NULL,
             active_message_id INTEGER,
-            summary_message_id INTEGER
+            summary_message_id INTEGER,
+            log_channel_id INTEGER
         )
     ''')
 
@@ -67,53 +67,37 @@ def initialize_db():
         )
     ''')
 
-    # Migracja danych ze starej tabeli on_duty_users do nowych
-    # (jeśli istnieją i nie zostały jeszcze zmigrowane)
+    # Sprawdzenie i dodanie nowej kolumny log_channel_id
     try:
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='on_duty_users';")
-        if cursor.fetchone(): # Jeśli stara tabela istnieje
-            print("Wykryto starą tabelę 'on_duty_users'. Rozpoczynanie migracji...")
-            # Przenieś sumaryczne godziny do user_duty_stats
-            cursor.execute('''
-                INSERT OR IGNORE INTO user_duty_stats (user_id, guild_id, total_duty_seconds)
-                SELECT user_id, guild_id, total_duty_seconds FROM on_duty_users
-            ''')
-            # Przenieś aktywnych użytkowników do active_duty_users
-            cursor.execute('''
-                INSERT OR IGNORE INTO active_duty_users (user_id, guild_id, start_time)
-                SELECT user_id, guild_id, start_time FROM on_duty_users
-                WHERE start_time IS NOT NULL -- Tylko ci, którzy byli na służbie
-            ''')
-            # Usuń starą tabelę po migracji
-            cursor.execute("DROP TABLE on_duty_users")
-            print("Migracja zakończona pomyślnie. Stara tabela 'on_duty_users' usunięta.")
-    except Exception as e:
-        print(f"Błąd podczas migracji starej tabeli: {e}")
-
-    # Dodaj kolumny active_message_id i summary_message_id do duty_panels, jeśli nie istnieją
-    try:
-        cursor.execute("ALTER TABLE duty_panels ADD COLUMN active_message_id INTEGER")
+        cursor.execute("ALTER TABLE duty_panels ADD COLUMN log_channel_id INTEGER")
     except sqlite3.OperationalError as e:
         if "duplicate column name" not in str(e):
-            raise
-    try:
-        cursor.execute("ALTER TABLE duty_panels ADD COLUMN summary_message_id INTEGER")
-    except sqlite3.OperationalError as e:
-        if "duplicate column name" not in str(e):
-            raise
+            raise # Rzuć błąd, jeśli to nie jest błąd duplikatu kolumny
 
     conn.commit()
     conn.close()
     print("Baza danych jest gotowa.")
 
-# --- Funkcje do zarządzania panelem służby ---
+# --- Funkcje do zarządzania panelem służby --- (z uwzględnieniem log_channel_id)
 
 def set_duty_panel(guild_id, channel_id, active_message_id, summary_message_id):
     """Zapisuje lub aktualizuje informacje o panelu służby dla danego serwera."""
     with get_db_connection() as conn:
         conn.execute(
-            "INSERT OR REPLACE INTO duty_panels (guild_id, channel_id, active_message_id, summary_message_id) VALUES (?, ?, ?, ?)",
-            (guild_id, channel_id, active_message_id, summary_message_id)
+            "INSERT INTO duty_panels (guild_id, channel_id, active_message_id, summary_message_id) VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(guild_id) DO UPDATE SET channel_id = ?, active_message_id = ?, summary_message_id = ?",
+            (guild_id, channel_id, active_message_id, summary_message_id, channel_id, active_message_id, summary_message_id)
+        )
+        conn.commit()
+
+def set_duty_log_channel(guild_id, log_channel_id):
+    """Ustawia lub aktualizuje kanał logów służby dla danego serwera."""
+    with get_db_connection() as conn:
+        # Upewnij się, że wpis dla guild_id istnieje, zanim go zaktualizujesz
+        conn.execute("INSERT OR IGNORE INTO duty_panels (guild_id, channel_id, active_message_id, summary_message_id) VALUES (?, 0, 0, 0)", (guild_id,))
+        conn.execute(
+            "UPDATE duty_panels SET log_channel_id = ? WHERE guild_id = ?",
+            (log_channel_id, guild_id)
         )
         conn.commit()
 
@@ -166,7 +150,7 @@ def set_user_total_duty_seconds(user_id, guild_id, seconds):
         conn.execute(
             "INSERT INTO user_duty_stats (user_id, guild_id, total_duty_seconds) VALUES (?, ?, ?) "
             "ON CONFLICT(user_id, guild_id) DO UPDATE SET total_duty_seconds = ?",
-            (user_id, guild_id, seconds)
+            (user_id, guild_id, seconds, seconds) # Poprawka: przekazuj `seconds` dwa razy
         )
         conn.commit()
 
@@ -189,7 +173,6 @@ def get_user_total_duty_seconds(user_id, guild_id):
 def get_all_total_duty_seconds(guild_id):
     """Pobiera sumę czasu służby dla wszystkich użytkowników na danym serwerze."""
     with get_db_connection() as conn:
-        # Usunięto filtr total_duty_seconds > 0
         users = conn.execute("SELECT user_id, total_duty_seconds FROM user_duty_stats WHERE guild_id = ? ORDER BY total_duty_seconds DESC", (guild_id,)).fetchall()
     return users
 
