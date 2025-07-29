@@ -142,7 +142,13 @@ class zmiana(commands.Cog):
                 return None
         return None
 
-    @tasks.loop(minutes=1)
+    import asyncio
+
+# ... (reszta importów)
+
+# ... (reszta kodu)
+
+    @tasks.loop(minutes=5)  # Zwiększono interwał do 5 minut
     async def update_loop(self):
         await self.bot.wait_until_ready()
         all_panels = database.get_all_duty_panels()
@@ -150,6 +156,7 @@ class zmiana(commands.Cog):
             guild = self.bot.get_guild(panel_info['guild_id'])
             if guild:
                 await self.update_duty_panels(guild)
+            await asyncio.sleep(0) # Dodano sleep, aby oddać kontrolę pętli zdarzeń
 
     async def update_duty_panels(self, guild: discord.Guild):
         panel_info = database.get_duty_panel(guild.id)
