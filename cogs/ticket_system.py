@@ -9,6 +9,7 @@ WRITER_ROLE_ID = 1396940700112781448  # dostęp i pisanie
 # Kanały i kategorie
 TICKET_CHANNEL_ID = 1396940700611907621  # ID kanału z formularzem
 TICKET_CATEGORY_ID = 1396940700788199545  # ID kategorii dla ticketów
+ARCHIVE_CATEGORY_ID = 1396940707503013926 # ID kategorii dla archiwum
 
 # Konfiguracja typów ticketów
 TICKET_TYPES = {
@@ -23,6 +24,7 @@ TICKET_TYPES = {
 			("Numer odznaki/legitymacni (Jeśli dotyczy)", "Napisz swój nr. odznaki/legitymacji jeśli masz", False),
 			("Inne uwagi", "POLE NIEOBOWIĄSKOWE", False)
 		]
+
 	},
 	"pozew": {
 		"label": "Złóż pozew do Sądu",
@@ -210,7 +212,19 @@ class TicketControlView(discord.ui.View):
 		if not any(role.id in self.allowed_roles for role in interaction.user.roles):
 			await interaction.response.send_message("Brak uprawnień.", ephemeral=True)
 			return
-		await interaction.channel.delete()
+
+		archive_category = interaction.guild.get_channel(ARCHIVE_CATEGORY_ID)
+		if not archive_category:
+			await interaction.response.send_message("Nie znaleziono kategorii archiwum.", ephemeral=True)
+			return
+
+		await interaction.channel.edit(category=archive_category)
+		await interaction.response.send_message("Zgłoszenie zostało zarchiwizowane.", ephemeral=True)
+
+		# Opcjonalnie: wyłącz przyciski po archiwizacji
+		for item in self.children:
+			item.disabled = True
+		await interaction.message.edit(view=self)
 
 async def setup(bot):
 	await bot.add_cog(TicketSystem(bot))
