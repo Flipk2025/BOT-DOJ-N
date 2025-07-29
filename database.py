@@ -130,8 +130,8 @@ def adjust_user_total_duty_seconds(user_id, guild_id, seconds_delta):
     with get_db_connection() as conn:
         conn.execute(
             "INSERT INTO user_duty_stats (user_id, guild_id, total_duty_seconds) VALUES (?, ?, ?) "
-            "ON CONFLICT(user_id, guild_id) DO UPDATE SET total_duty_seconds = total_duty_seconds + ?",
-            (user_id, guild_id, seconds_delta, seconds_delta)
+            "ON CONFLICT(user_id, guild_id) DO UPDATE SET total_duty_seconds = MAX(0, total_duty_seconds + ?)",
+            (user_id, guild_id, max(0, seconds_delta), seconds_delta)
         )
 
 def get_user_total_duty_seconds(user_id, guild_id):
