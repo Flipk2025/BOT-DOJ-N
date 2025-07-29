@@ -24,7 +24,6 @@ TICKET_TYPES = {
 			("Numer odznaki/legitymacni (Jeśli dotyczy)", "Napisz swój nr. odznaki/legitymacji jeśli masz", False),
 			("Inne uwagi", "POLE NIEOBOWIĄSKOWE", False)
 		]
-
 	},
 	"pozew": {
 		"label": "Złóż pozew do Sądu",
@@ -218,10 +217,25 @@ class TicketControlView(discord.ui.View):
 			await interaction.response.send_message("Nie znaleziono kategorii archiwum.", ephemeral=True)
 			return
 
-		await interaction.channel.edit(category=archive_category)
+		# Znajdź twórcę ticketu (autora pierwszej wiadomości)
+		ticket_creator = None
+		async for message in interaction.channel.history(oldest_first=True, limit=1):
+			if message.mentions:
+				ticket_creator = message.mentions[0]
+			break
+
+		# Nowe uprawnienia dla zarchiwizowanego kanału
+		overwrites = {
+			interaction.guild.default_role: discord.PermissionOverwrite(view_channel=False),
+			interaction.guild.get_role(WRITER_ROLE_ID): discord.PermissionOverwrite(view_channel=True, send_messages=True)
+		}
+		if ticket_creator:
+			overwrites[ticket_creator] = discord.PermissionOverwrite(view_channel=False)
+
+		await interaction.channel.edit(category=archive_category, overwrites=overwrites)
 		await interaction.response.send_message("Zgłoszenie zostało zarchiwizowane.", ephemeral=True)
 
-		# Opcjonalnie: wyłącz przyciski po archiwizacji
+		# Wyłącz przyciski po archiwizacji
 		for item in self.children:
 			item.disabled = True
 		await interaction.message.edit(view=self)
