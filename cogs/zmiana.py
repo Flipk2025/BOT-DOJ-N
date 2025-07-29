@@ -57,7 +57,7 @@ class DutyView(discord.ui.View):
 
         start_time = datetime.datetime.fromisoformat(duty_entry['start_time'])
         duration_seconds = (datetime.datetime.utcnow() - start_time).total_seconds()
-        database.adjust_user_total_duty_seconds(user.id, guild.id, duration_seconds)
+        database.adjust_user_total_duty_seconds(user.id, guild.id, int(duration_seconds)) # <-- Zmiana na int()
         
         await self.cog.send_duty_log(guild, user, "off", start_time, duty_entry['log_message_id'])
 
