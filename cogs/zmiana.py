@@ -181,11 +181,15 @@ class zmiana(commands.Cog):
 
         summary_embed = discord.Embed(title="Podsumowanie godzin służby", color=discord.Color.green())
         all_total_duty = database.get_all_total_duty_seconds(guild.id)
-        if not all_total_duty:
+        
+        # Sortowanie po stronie bota dla pewności
+        sorted_duty = sorted(all_total_duty, key=lambda x: x['total_duty_seconds'], reverse=True)
+
+        if not sorted_duty:
             total_description = "Brak zarejestrowanych godzin służby."
         else:
             total_lines = []
-            for user_row in all_total_duty:
+            for user_row in sorted_duty:
                 member = guild.get_member(user_row['user_id'])
                 if member:
                     total_seconds = user_row['total_duty_seconds']
