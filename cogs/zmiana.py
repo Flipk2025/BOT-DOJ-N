@@ -2,11 +2,11 @@ import discord
 from discord.ext import commands, tasks
 from discord import app_commands
 import datetime
-import database # Importujemy cały moduł database
+import database
 import logging
 import pytz
 
-logger = logging.getLogger('bot') # Używamy istniejącego loggera
+logger = logging.getLogger('bot')
 
 class DutyView(discord.ui.View):
     def __init__(self, cog_instance):
@@ -15,66 +15,44 @@ class DutyView(discord.ui.View):
 
     @discord.ui.button(label="Wejdź na służbę", style=discord.ButtonStyle.success, custom_id="duty_on")
     async def duty_on(self, interaction: discord.Interaction, button: discord.ui.Button):
-        logger.info(f"DEBUG: Entering duty_on for user {interaction.user.id}")
-        try:
-            await interaction.response.defer(ephemeral=True)
-        except Exception as e:
-            logger.error(f"DEBUG: Błąd defer w duty_on dla {interaction.user.id}: {e}")
-            await interaction.followup.send("Wystąpił błąd podczas przetwarzania. Spróbuj ponownie.", ephemeral=True)
+        await interaction.response.defer(ephemeral=True)
+        user = interaction.user
+        guild = interaction.guild
+
+        if database.is_user_on_duty(user.id, guild.id):
+            await interaction.followup.send("Jesteś już na służbie!", ephemeral=True)
             return
 
-        user = interaction.user
-        guild_id = interaction.guild.id
+        start_time = datetime.datetime.utcnow()
+        log_message = await self.cog.send_duty_log(guild, user, "on", start_time)
+        log_message_id = log_message.id if log_message else None
 
-        if database.is_user_on_duty(user.id, guild_id):
-            await interaction.followup.send("Jesteś już na służbie!", ephemeral=True)
-            database.log_duty_event(guild_id, user.id, "Próba wejścia na służbę (już na służbie)")
-        else:
-            start_time = datetime.datetime.utcnow()
-            database.add_user_to_duty(user.id, guild_id, start_time)
-            await interaction.followup.send("Wszedłeś na służbę.", ephemeral=True)
-            database.log_duty_event(guild_id, user.id, "Wszedł na służbę")
-            await self.cog.send_duty_log(interaction.guild, user, "on")
-            await self.cog.update_duty_panels(interaction.guild)
+        database.add_user_to_duty(user.id, guild.id, start_time, log_message_id)
+        await interaction.followup.send("Wszedłeś na służbę.", ephemeral=True)
+        database.log_duty_event(guild.id, user.id, "Wszedł na służbę")
+        await self.cog.update_duty_panels(guild)
 
     @discord.ui.button(label="Zejdź ze służby", style=discord.ButtonStyle.danger, custom_id="duty_off")
     async def duty_off(self, interaction: discord.Interaction, button: discord.ui.Button):
-        logger.info(f"DEBUG: Entering duty_off for user {interaction.user.id}")
-        try:
-            await interaction.response.defer(ephemeral=True)
-        except Exception as e:
-            logger.error(f"DEBUG: Błąd defer w duty_off dla {interaction.user.id}: {e}")
-            await interaction.followup.send("Wystąpił błąd podczas przetwarzania. Spróbuj ponownie.", ephemeral=True)
+        await interaction.response.defer(ephemeral=True)
+        user = interaction.user
+        guild = interaction.guild
+
+        duty_entry = database.get_user_duty_entry(user.id, guild.id)
+        if not duty_entry:
+            await interaction.followup.send("Nie jesteś na służbie!", ephemeral=True)
             return
 
-        user = interaction.user
-        guild_id = interaction.guild.id
+        start_time = datetime.datetime.fromisoformat(duty_entry['start_time'])
+        duration_seconds = (datetime.datetime.utcnow() - start_time).total_seconds()
+        database.adjust_user_total_duty_seconds(user.id, guild.id, duration_seconds)
+        
+        await self.cog.send_duty_log(guild, user, "off", start_time, duty_entry['log_message_id'])
 
-        try:
-            if database.is_user_on_duty(user.id, guild_id):
-                user_data = database.get_on_duty_users(guild_id)
-                user_on_duty_entry = next((u for u in user_data if u['user_id'] == user.id), None)
-
-                duration_seconds = 0
-                if user_on_duty_entry:
-                    start_time = datetime.datetime.fromisoformat(user_on_duty_entry['start_time'])
-                    duration_seconds = (datetime.datetime.utcnow() - start_time).total_seconds()
-                    database.adjust_user_total_duty_seconds(user.id, guild_id, duration_seconds)
-                    database.log_duty_event(guild_id, user.id, "Zszedł ze służby", f"Czas trwania: {int(duration_seconds)}s")
-                else:
-                    database.log_duty_event(guild_id, user.id, "Błąd zejścia ze służby", "Użytkownik nie znaleziony w active_duty_users mimo is_user_on_duty")
-
-                database.remove_user_from_duty(user.id, guild_id)
-                await interaction.followup.send("Zszedłeś ze służby.", ephemeral=True)
-                await self.cog.send_duty_log(interaction.guild, user, "off", duration_seconds)
-                await self.cog.update_duty_panels(interaction.guild)
-            else:
-                await interaction.followup.send("Nie jesteś na służbie!", ephemeral=True)
-                database.log_duty_event(guild_id, user.id, "Próba zejścia ze służby (nie na służbie)")
-        except Exception as e:
-            await interaction.followup.send("Wystąpił błąd podczas próby zejścia ze służby.", ephemeral=True)
-            database.log_duty_event(guild_id, user.id, "Krytyczny błąd zejścia ze służby", f"Błąd: {e}")
-            logger.error(f"Krytyczny błąd w duty_off dla użytkownika {user.id}: {e}")
+        database.remove_user_from_duty(user.id, guild.id)
+        await interaction.followup.send("Zszedłeś ze służby.", ephemeral=True)
+        database.log_duty_event(guild.id, user.id, "Zszedł ze służby", f"Czas trwania: {int(duration_seconds)}s")
+        await self.cog.update_duty_panels(guild)
 
 class zmiana(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -86,50 +64,63 @@ class zmiana(commands.Cog):
     def cog_unload(self):
         self.update_loop.cancel()
 
-    async def send_duty_log(self, guild: discord.Guild, user: discord.Member, event_type: str, duration_seconds: int = 0):
+    async def send_duty_log(self, guild: discord.Guild, user: discord.Member, event_type: str, start_time: datetime.datetime, log_message_id: int = None):
         panel_info = database.get_duty_panel(guild.id)
         if not panel_info or not panel_info['log_channel_id']:
-            return
+            return None
 
         log_channel = guild.get_channel(panel_info['log_channel_id'])
         if not log_channel:
-            return
+            return None
 
-        now_utc = datetime.datetime.utcnow()
-        now_poland = now_utc.astimezone(self.poland_tz)
-        timestamp = f"<t:{int(now_utc.timestamp())}:F>"
+        start_timestamp = f"<t:{int(start_time.timestamp())}:F>"
 
         if event_type == "on":
             embed = discord.Embed(
-                title="🟢 Wejście na służbę",
-                description=f"**Użytkownik:** {user.mention} ({user.display_name})\n**Czas:** {timestamp}",
+                title="🟢 Służba w toku...",
+                description=f"**Użytkownik:** {user.mention} ({user.display_name})",
                 color=discord.Color.green()
             )
-        elif event_type == "off":
-            total_seconds_user = database.get_user_total_duty_seconds(user.id, guild.id)
-            
-            # Formatowanie czasu trwania ostatniej służby
-            h, rem = divmod(duration_seconds, 3600)
-            m, s = divmod(rem, 60)
-            duration_str = f"{int(h)}h {int(m)}m {int(s)}s"
+            embed.add_field(name="Czas wejścia", value=start_timestamp, inline=False)
+            try:
+                message = await log_channel.send(embed=embed)
+                return message
+            except discord.Forbidden:
+                logger.warning(f"Brak uprawnień do wysyłania wiadomości na kanale logów służby (ID: {log_channel.id})")
+                return None
 
-            # Formatowanie łącznego czasu służby
-            th, trem = divmod(total_seconds_user, 3600)
-            tm, ts = divmod(trem, 60)
-            total_duration_str = f"{int(th)}h {int(tm)}m"
+        elif event_type == "off" and log_message_id:
+            try:
+                message = await log_channel.fetch_message(log_message_id)
+                end_time = datetime.datetime.utcnow()
+                end_timestamp = f"<t:{int(end_time.timestamp())}:F>"
+                duration_seconds = (end_time - start_time).total_seconds()
+                total_seconds_user = database.get_user_total_duty_seconds(user.id, guild.id)
 
-            embed = discord.Embed(
-                title="🔴 Zejście ze służby",
-                description=f"**Użytkownik:** {user.mention} ({user.display_name})\n**Czas:** {timestamp}",
-                color=discord.Color.red()
-            )
-            embed.add_field(name="Czas ostatniej służby", value=duration_str, inline=False)
-            embed.add_field(name="Łączny czas na służbie", value=total_duration_str, inline=False)
-        
-        try:
-            await log_channel.send(embed=embed)
-        except discord.Forbidden:
-            logger.warning(f"Brak uprawnień do wysyłania wiadomości na kanale logów służby (ID: {log_channel.id})")
+                h, rem = divmod(duration_seconds, 3600)
+                m, s = divmod(rem, 60)
+                duration_str = f"{int(h)}h {int(m)}m {int(s)}s"
+
+                th, trem = divmod(total_seconds_user, 3600)
+                tm, ts = divmod(trem, 60)
+                total_duration_str = f"{int(th)}h {int(tm)}m"
+
+                embed = message.embeds[0]
+                embed.title = "✅ Służba zakończona"
+                embed.color = discord.Color.greyple()
+                embed.add_field(name="Czas zejścia", value=end_timestamp, inline=False)
+                embed.add_field(name="Czas trwania służby", value=duration_str, inline=True)
+                embed.add_field(name="Łączny czas na służbie", value=total_duration_str, inline=True)
+                
+                await message.edit(embed=embed)
+                return message
+            except discord.NotFound:
+                logger.warning(f"Nie znaleziono wiadomości logu (ID: {log_message_id}) do edycji.")
+                return None
+            except discord.Forbidden:
+                logger.warning(f"Brak uprawnień do edycji wiadomości na kanale logów służby (ID: {log_channel.id})")
+                return None
+        return None
 
     @tasks.loop(minutes=1)
     async def update_loop(self):
@@ -142,18 +133,14 @@ class zmiana(commands.Cog):
 
     async def update_duty_panels(self, guild: discord.Guild):
         panel_info = database.get_duty_panel(guild.id)
-        if not panel_info:
+        if not panel_info or not panel_info['channel_id']:
             return
 
         channel = guild.get_channel(panel_info['channel_id'])
         if not channel:
             return
 
-        # --- Aktualizacja panelu aktywnych ---
-        active_embed = discord.Embed(
-            title="Aktywni na służbie",
-            color=discord.Color.blue()
-        )
+        active_embed = discord.Embed(title="Aktywni na służbie", color=discord.Color.blue())
         guild_users_on_duty = database.get_on_duty_users(guild.id)
         if not guild_users_on_duty:
             active_description = "Nikt aktualnie nie jest na służbie."
@@ -165,11 +152,9 @@ class zmiana(commands.Cog):
                 if member:
                     start_time = datetime.datetime.fromisoformat(user_row['start_time'])
                     duration = now - start_time
-                    total_minutes = int(duration.total_seconds() / 60)
-                    hours = total_minutes // 60
-                    minutes = total_minutes % 60
-                    time_str = f"{hours:02}:{minutes:02}"
-                    active_lines.append(f"{member.display_name} - {time_str}")
+                    h, rem = divmod(duration.total_seconds(), 3600)
+                    m, s = divmod(rem, 60)
+                    active_lines.append(f"{member.display_name} - {int(h):02}:{int(m):02}")
             active_description = "\n".join(active_lines)
         active_embed.description = active_description
 
@@ -179,11 +164,7 @@ class zmiana(commands.Cog):
         except discord.NotFound:
             pass
 
-        # --- Aktualizacja panelu podsumowania godzin ---
-        summary_embed = discord.Embed(
-            title="Podsumowanie godzin służby",
-            color=discord.Color.green()
-        )
+        summary_embed = discord.Embed(title="Podsumowanie godzin służby", color=discord.Color.green())
         all_total_duty = database.get_all_total_duty_seconds(guild.id)
         if not all_total_duty:
             total_description = "Brak zarejestrowanych godzin służby."
@@ -193,10 +174,9 @@ class zmiana(commands.Cog):
                 member = guild.get_member(user_row['user_id'])
                 if member:
                     total_seconds = user_row['total_duty_seconds']
-                    total_minutes = int(total_seconds / 60)
-                    hours = total_minutes // 60
-                    minutes = total_minutes % 60
-                    total_lines.append(f"{member.display_name}: {hours:02}h {minutes:02}m")
+                    h, rem = divmod(total_seconds, 3600)
+                    m, s = divmod(rem, 60)
+                    total_lines.append(f"{member.display_name}: {int(h):02}h {int(m):02}m")
             total_description = "\n".join(total_lines)
         summary_embed.description = total_description
 
@@ -209,53 +189,28 @@ class zmiana(commands.Cog):
     @app_commands.command(name="setup_zmiana", description="Ustawia panel do zarządzania zmianą na danym kanale.")
     @app_commands.checks.has_permissions(administrator=True)
     async def setup_zmiana(self, interaction: discord.Interaction, channel: discord.TextChannel):
-        logger.info(f"DEBUG: Entering setup_zmiana for user {interaction.user.id}")
-        try:
-            await interaction.response.defer(ephemeral=True)
-        except Exception as e:
-            logger.error(f"DEBUG: Błąd defer w setup_zmiana dla {interaction.user.id}: {e}")
-            await interaction.followup.send("Wystąpił błąd podczas przetwarzania. Spróbuj ponownie.", ephemeral=True)
-            return
-
-        active_embed = discord.Embed(
-            title="Aktywni na służbie",
-            description="Nikt aktualnie nie jest na służbie.",
-            color=discord.Color.blue()
-        )
+        await interaction.response.defer(ephemeral=True)
+        active_embed = discord.Embed(title="Aktywni na służbie", description="Nikt aktualnie nie jest na służbie.", color=discord.Color.blue())
         view = DutyView(self)
         try:
             active_message = await channel.send(embed=active_embed, view=view)
-        except discord.Forbidden:
-            await interaction.followup.send("Nie mam uprawnień do wysyłania wiadomości na tym kanale.")
-            database.log_duty_event(interaction.guild.id, interaction.user.id, "Błąd użycia setup_zmiana", f"Brak uprawnień na kanale: {channel.name}")
-            return
-
-        summary_embed = discord.Embed(
-            title="Podsumowanie godzin służby",
-            description="Brak zarejestrowanych godzin służby.",
-            color=discord.Color.green()
-        )
-        try:
+            summary_embed = discord.Embed(title="Podsumowanie godzin służby", description="Brak zarejestrowanych godzin służby.", color=discord.Color.green())
             summary_message = await channel.send(embed=summary_embed)
         except discord.Forbidden:
             await interaction.followup.send("Nie mam uprawnień do wysyłania wiadomości na tym kanale.")
-            database.log_duty_event(interaction.guild.id, interaction.user.id, "Błąd użycia setup_zmiana", f"Brak uprawnień na kanale: {channel.name}")
-            await active_message.delete()
             return
 
         database.set_duty_panel(interaction.guild.id, channel.id, active_message.id, summary_message.id)
-        database.log_duty_event(interaction.guild.id, interaction.user.id, "Użyto komendy setup_zmiana", f"Kanał: {channel.name}")
-        await interaction.followup.send(f"Panel służby został pomyślnie ustawiony na kanale {channel.mention}. (Dwie wiadomości)")
+        await interaction.followup.send(f"Panel służby został pomyślnie ustawiony na kanale {channel.mention}.")
 
     @app_commands.command(name="setup_logi_sluzby", description="Ustawia kanał, na który będą wysyłane logi wejść i zejść ze służby.")
     @app_commands.checks.has_permissions(administrator=True)
     async def setup_logi_sluzby(self, interaction: discord.Interaction, channel: discord.TextChannel):
         await interaction.response.defer(ephemeral=True)
-        guild_id = interaction.guild.id
-        database.set_duty_log_channel(guild_id, channel.id)
-        database.log_duty_event(guild_id, interaction.user.id, "Ustawiono kanał logów służby", f"Kanał: {channel.name}")
+        database.set_duty_log_channel(interaction.guild.id, channel.id)
         await interaction.followup.send(f"Kanał logów służby został ustawiony na {channel.mention}.")
 
+    # ... (reszta komend administracyjnych bez zmian) ...
     @app_commands.command(name="reset_godzin", description="Resetuje sumę godzin służby dla wszystkich użytkowników.")
     @app_commands.checks.has_permissions(administrator=True)
     async def reset_godzin(self, interaction: discord.Interaction):
@@ -314,9 +269,7 @@ class zmiana(commands.Cog):
     async def show_duty_logs(self, interaction: discord.Interaction, limit: int = 10):
         await interaction.response.defer(ephemeral=True)
         guild_id = interaction.guild.id
-        database.log_duty_event(guild_id, interaction.user.id, "Użyto komendy pokaz_logi_sluzby", f"Limit: {limit}")
         logs = database.get_duty_logs(guild_id, limit)
-
         if not logs:
             await interaction.followup.send("Brak logów służby.")
             return
@@ -331,14 +284,10 @@ class zmiana(commands.Cog):
             log_lines.append(f"[{timestamp}] {username}: {action}{details}")
         
         log_message = "\n".join(log_lines)
-        if len(log_message) > 2000:
-            log_message = log_message[:1990] + "... (skrócono)"
+        if len(log_message) > 4000:
+             log_message = log_message[:3990] + "..."
 
-        embed = discord.Embed(
-            title="Logi Służby",
-            description=f"```\n{log_message}\n```",
-            color=discord.Color.orange()
-        )
+        embed = discord.Embed(title="Logi Służby", description=f"```\n{log_message}\n```", color=discord.Color.orange())
         await interaction.followup.send(embed=embed)
 
 async def setup(bot: commands.Bot):

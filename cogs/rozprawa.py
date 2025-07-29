@@ -53,8 +53,8 @@ class Rozprawa(commands.Cog):
         godzina="Godzina w formacie HH:MM (24h)",
         sedzia_prowadzacy="Sędzia prowadzący",
         sedzia_pomocniczy="Sędzia pomocniczy",
-        tryb="Tryb rozprawy",
-        oskarzeni="Wzmiankuj oskarżonych"
+        tryb="Charakter rozprawy",
+        oskarzeni="Sprawa (oskarżeni lub oskarżyciele)"
     )
     async def rozprawa(
         self, interaction: discord.Interaction,
@@ -124,8 +124,8 @@ class Rozprawa(commands.Cog):
                 f"### Godzina: {godzina}"
                 f"### Sędzia prowadzący: {sedzia_prowadzacy}"
                 f"### Sędzia pomocniczy: {sedzia_pomocniczy}"
-                f"### Tryb: {tryb}"
-                f"### Oskarżony: {oskarzeni}"
+                f"### Charakter: {tryb}"
+                f"### Sprawa: {oskarzeni}"
                 "``` ```"
                 "||<@&1370830123523379210>||"
             )
